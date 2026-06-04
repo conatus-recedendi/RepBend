@@ -61,5 +61,9 @@ extra-index-url = ["https://download.pytorch.org/whl/cu118"]
 # Packages that ship no pure-Python sdist — uv must use the pre-built wheel
 no-build-isolation-package = ["flash-attn"]
 
+# flash-attn의 setup.py가 packaging을 선언 없이 사용하므로 명시적으로 주입
+[tool.uv.extra-build-dependencies]
+flash-attn = ["packaging"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["methods", "activation", "safety_evaluation"]
