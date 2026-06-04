@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "repbend"
+version = "0.1.0"
+description = "Representation Bending for Large Language Model Safety"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Ashkan Yousefpour" },
+]
+keywords = ["llm", "safety", "representation", "jailbreak"]
+
+dependencies = [
+    # Core ML
+    "torch==2.3.1",
+    "torchvision",
+    "numpy==1.26.4",
+    # Hugging Face ecosystem
+    "transformers==4.40.0",
+    "peft==0.11.1",
+    "trl==0.8.6",
+    "accelerate==0.29.3",
+    "deepspeed==0.14.0",
+    # Training utilities
+    "bitsandbytes",
+    "torch-optimizer",
+    "easydict",
+    # Data / IO
+    "pandas",
+    "jsonlines",
+    "sentencepiece",
+    "protobuf",
+    # Vision (used in activation analysis)
+    "opencv-python",
+    "timm",
+    "pycocoevalcap",
+]
+
+[project.optional-dependencies]
+# flash-attn requires matching CUDA toolkit; install manually if needed:
+#   pip install flash-attn==2.5.9.post1 --no-build-isolation
+flash = ["flash-attn==2.5.9.post1"]
+
+dev = [
+    "ipykernel",
+    "jupyter",
+    "matplotlib",
+    "seaborn",
+    "pandas",
+    "scipy",
+]
+
+[tool.uv]
+# xformers wheel is tied to specific torch/CUDA version; installed via extra index
+extra-index-url = ["https://download.pytorch.org/whl/cu118"]
+
+# Packages that ship no pure-Python sdist — uv must use the pre-built wheel
+no-build-isolation-package = ["flash-attn"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["methods", "activation", "safety_evaluation"]
