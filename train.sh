@@ -20,18 +20,26 @@ if [ $METHOD == "NPO" ]; then
     alpha=1.0
     beta=0.1
     gamma=0.1
-    max_step=1000
-    eval_steps=20000
-    max_seq_length=4096
-    per_device_train_batch_size=4
-    gradient_accumulation_steps=4
+    if [ $MODEL == "Mistral-7b" ]; then
+        max_step=600
+        eval_steps=20000
+        max_seq_length=4096
+        per_device_train_batch_size=4
+        gradient_accumulation_steps=4
+    elif [ $MODEL == "Meta_Llama3_8b" ]; then
+        max_step=150
+        eval_steps=1000
+        max_seq_length=4096
+        per_device_train_batch_size=4
+        gradient_accumulation_steps=4
+    fi
 elif [ $METHOD == "DPO" ]; then
     learning_rate=5e-5
     beta=0.1
     eval_steps=20000
     max_seq_length=4096
-    per_device_train_batch_size=16
-    gradient_accumulation_steps=1
+    per_device_train_batch_size=4
+    gradient_accumulation_steps=4
 elif [ $METHOD == "WHP" ]; then
     learning_rate=5e-5
     alpha=0.5
