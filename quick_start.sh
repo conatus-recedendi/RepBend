@@ -64,17 +64,16 @@ install_env() {
         uv venv --python 3.10 .venv
     fi
 
-    # 의존성 설치
+    # 의존성 설치 (cu121 휠 – 드라이버 570 / CUDA 12.8 호환)
     info "의존성 패키지를 설치합니다..."
-    uv pip install --extra-index-url https://download.pytorch.org/whl/cu118 \
+    uv pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
+        --index-strategy unsafe-best-match \
         -e ".[dev]"
 
-    # xformers: torch/CUDA 버전에 맞는 빌드 필요
-    uv pip install --extra-index-url https://download.pytorch.org/whl/cu118 \
-        "xformers==0.0.27" || warn "xformers 설치 실패 – 학습은 계속 진행 가능합니다."
+    # xformers 는 vllm 0.5.5 가 0.0.27.post2 를 자동으로 끌어옵니다 (별도 설치 불필요)
 
     # flash-attn: CUDA 툴킷 필요 (실패해도 계속 진행)
-    uv pip install --no-build-isolation "flash-attn==2.5.9.post1" \
+    uv pip install --no-build-isolation "flash-attn==2.6.3" \
         || warn "flash-attn 설치 실패 – flash attention 없이 진행합니다."
 
     info "환경 설치 완료."

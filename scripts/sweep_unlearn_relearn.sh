@@ -30,6 +30,19 @@ MASTER_PORT=$((29000 + RANDOM % 1000))
 export CUBLAS_WORKSPACE_CONFIG=:16:8
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
+# ── Python 실행 경로 자동 감지 ─────────────────────────────────────────────
+# venv가 활성화되어 있으면 그것을, 아니면 python3/python 순으로 탐색
+if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+    PYTHON="$VIRTUAL_ENV/bin/python"
+elif [[ -f ".venv/bin/python" ]]; then
+    PYTHON="$(pwd)/.venv/bin/python"
+    source .venv/bin/activate
+else
+    PYTHON="$(command -v python3 || command -v python || echo 'python3')"
+fi
+export PYTHON
+echo "[SWEEP] Python 실행 경로: $PYTHON"
+
 # ── 모델 경로 ────────────────────────────────────────────────────────────────
 if [[ "$MODEL" == "Mistral-7b" ]]; then
     BASE_MODEL="mistralai/Mistral-7B-Instruct-v0.2"
@@ -77,7 +90,7 @@ LOSS_CONFIGS=(
 extract_asr() {
     local log_json="$1"
     if [[ ! -f "$log_json" ]]; then echo "N/A"; return; fi
-    python3 - <<PYEOF
+    "$PYTHON" - <<PYEOF
 import json, sys
 with open("$log_json") as f:
     data = json.load(f)
@@ -95,15 +108,38 @@ PYEOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 헬퍼: 단계별 실행 래퍼 (이미 완료됐으면 스킵)
+# 헬퍼: 단계별 실행 래퍼
+#   run_step <sentinel> <validate_file> <cmd...>
+#
+#   sentinel      : 완료 표시 파일
+#   validate_file : 실제 성공 여부를 확인할 출력 파일 (없으면 "" 전달)
+#                   sentinel이 있어도 validate_file이 없으면 재실행
+#   FORCE=1       : sentinel 무시하고 항상 재실행
 # ─────────────────────────────────────────────────────────────────────────────
+FORCE="${FORCE:-0}"
+
 run_step() {
-    local sentinel="$1"; shift
-    if [[ -f "$sentinel" ]]; then
-        warn "이미 완료 ($sentinel), 스킵합니다."
-        return 0
+    local sentinel="$1"
+    local validate="$2"
+    shift 2
+
+    if [[ "$FORCE" != "1" && -f "$sentinel" ]]; then
+        # sentinel이 있어도 실제 출력 파일이 없으면 재실행
+        if [[ -z "$validate" || -f "$validate" ]]; then
+            warn "이미 완료 ($sentinel), 스킵합니다."
+            return 0
+        else
+            warn "Sentinel 존재하나 출력 파일 없음 → 재실행: $validate"
+            rm -f "$sentinel"
+        fi
     fi
+
     "$@"
+    local exit_code=$?
+    if [[ $exit_code -ne 0 ]]; then
+        echo "[ERROR] 명령 실패 (exit=$exit_code): $*" >&2
+        return $exit_code
+    fi
     touch "$sentinel"
 }
 
@@ -146,7 +182,7 @@ for LAYER_CFG in "${LAYER_CONFIGS[@]}"; do
         mkdir -p "$UNLEARN_DIR" "$EVAL_UNLEARN_DIR"
 
         # ── (1) Unlearning ─────────────────────────────────────────────────
-        run_step "$UNLEARN_DIR/.done" \
+        run_step "$UNLEARN_DIR/.done" "$UNLEARN_DIR/adapter_config.json" \
             bash -c "
 CUDA_VISIBLE_DEVICES=$DEVICE \
 accelerate launch \
@@ -188,9 +224,9 @@ accelerate launch \
 "
 
         # ── (2) Unlearning 후 평가 ──────────────────────────────────────────
-        run_step "$EVAL_UNLEARN_DIR/.done" \
+        run_step "$EVAL_UNLEARN_DIR/.done" "$EVAL_UNLEARN_DIR/log.json" \
             bash -c "
-CUDA_VISIBLE_DEVICES=$DEVICE python safety_evaluation/evaluate.py \
+CUDA_VISIBLE_DEVICES=$DEVICE $PYTHON safety_evaluation/evaluate.py \
     -m $UNLEARN_DIR \
     --benchmark $BENCHMARK \
     --output_dir $EVAL_UNLEARN_DIR \
@@ -208,9 +244,9 @@ CUDA_VISIBLE_DEVICES=$DEVICE python safety_evaluation/evaluate.py \
             # n_shot: low_budget 모드에서 사용 (50샘플)
             N_SHOT=50
 
-            run_step "$RELEARN_DIR/.done" \
+            run_step "$RELEARN_DIR/.done" "$RELEARN_DIR/adapter_config.json" \
                 bash -c "
-CUDA_VISIBLE_DEVICES=$DEVICE python methods/relearning/train.py \
+CUDA_VISIBLE_DEVICES=$DEVICE $PYTHON methods/relearning/train.py \
     --model_name_or_path $BASE_MODEL \
     --adapter_name_or_path $UNLEARN_DIR \
     --relearning_mode $RL_MODE \
@@ -227,9 +263,9 @@ CUDA_VISIBLE_DEVICES=$DEVICE python methods/relearning/train.py \
     2>&1 | tee $RELEARN_DIR/train.log
 "
 
-            run_step "$EVAL_RELEARN_DIR/.done" \
+            run_step "$EVAL_RELEARN_DIR/.done" "$EVAL_RELEARN_DIR/log.json" \
                 bash -c "
-CUDA_VISIBLE_DEVICES=$DEVICE python safety_evaluation/evaluate.py \
+CUDA_VISIBLE_DEVICES=$DEVICE $PYTHON safety_evaluation/evaluate.py \
     -m $RELEARN_DIR \
     --benchmark $BENCHMARK \
     --output_dir $EVAL_RELEARN_DIR \
@@ -237,7 +273,7 @@ CUDA_VISIBLE_DEVICES=$DEVICE python safety_evaluation/evaluate.py \
 "
             ASR_RELEARN=$(extract_asr "$EVAL_RELEARN_DIR/log.json")
             # delta: relearning 후 - unlearning 후 (양수 = relearning으로 성능 회복)
-            ASR_DELTA=$(python3 -c "
+            ASR_DELTA=$("$PYTHON" -c "
 a='$ASR_UNLEARN'; b='$ASR_RELEARN'
 try:
     print(f'{float(b)-float(a):.4f}')
@@ -258,5 +294,5 @@ info "=== Sweep 완료: $(date) ==="
 info "결과 CSV : $RESULTS_CSV"
 info ""
 info "Figure 생성 중..."
-python analysis/plot_relearning_analysis.py --results_csv "$RESULTS_CSV" --output_dir "$SWEEP_ROOT/figures"
+$PYTHON analysis/plot_relearning_analysis.py --results_csv "$RESULTS_CSV" --output_dir "$SWEEP_ROOT/figures"
 info "Figure 저장됨 : $SWEEP_ROOT/figures/"

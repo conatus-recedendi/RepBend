@@ -15,16 +15,16 @@ authors = [
 keywords = ["llm", "safety", "representation", "jailbreak"]
 
 dependencies = [
-    # Core ML
-    "torch==2.3.1",
-    "torchvision",
+    # Core ML  (CUDA 12.x / cu121 휠, 드라이버 570 + CUDA 12.8 호환)
+    "torch==2.4.0",
+    "torchvision==0.19.0",
     "numpy==1.26.4",
     # Hugging Face ecosystem
-    "transformers==4.40.0",
-    "peft==0.11.1",
-    "trl==0.8.6",
-    "accelerate==0.29.3",
-    "deepspeed==0.14.0",
+    "transformers==4.44.2",
+    "peft==0.12.0",
+    "trl==0.9.6",
+    "accelerate==0.33.0",
+    "deepspeed==0.14.4",
     # Training utilities
     "bitsandbytes",
     "torch-optimizer",
@@ -38,12 +38,14 @@ dependencies = [
     "opencv-python",
     "timm",
     "pycocoevalcap",
+    # Evaluation judge (vllm 0.5.5 → torch 2.4.0, transformers >= 4.43.2)
+    "vllm==0.5.5",
 ]
 
 [project.optional-dependencies]
 # flash-attn requires matching CUDA toolkit; install manually if needed:
-#   pip install flash-attn==2.5.9.post1 --no-build-isolation
-flash = ["flash-attn==2.5.9.post1"]
+#   pip install flash-attn==2.6.3 --no-build-isolation
+flash = ["flash-attn==2.6.3"]
 
 dev = [
     "ipykernel",
@@ -55,9 +57,9 @@ dev = [
 ]
 
 [tool.uv]
-# xformers wheel is tied to specific torch/CUDA version; installed via extra index
-extra-index-url = ["https://download.pytorch.org/whl/cu118"]
-# torch cu118 wheel은 PyPI가 아닌 pytorch 인덱스에만 있으므로 모든 인덱스에서 최적 버전을 탐색
+# torch 2.4.0 cu121 휠 (드라이버 570 / CUDA 12.8 에서 정상 동작 — 상위 호환)
+extra-index-url = ["https://download.pytorch.org/whl/cu121"]
+# torch cu121 wheel은 PyPI가 아닌 pytorch 인덱스에만 있으므로 모든 인덱스에서 최적 버전을 탐색
 index-strategy = "unsafe-best-match"
 
 # Packages that ship no pure-Python sdist — uv must use the pre-built wheel
@@ -65,7 +67,7 @@ no-build-isolation-package = ["flash-attn"]
 
 # flash-attn의 setup.py가 packaging을 선언 없이 사용하므로 명시적으로 주입
 [tool.uv.extra-build-dependencies]
-flash-attn = ["packaging"]
+flash-attn = ["packaging", "torch"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["methods", "activation", "safety_evaluation"]
