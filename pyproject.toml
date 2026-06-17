@@ -7,7 +7,7 @@ name = "repbend"
 version = "0.1.0"
 description = "Representation Bending for Large Language Model Safety"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10, <3.13"
 license = { text = "MIT" }
 authors = [
     { name = "Ashkan Yousefpour" },
@@ -57,6 +57,8 @@ dev = [
 [tool.uv]
 # xformers wheel is tied to specific torch/CUDA version; installed via extra index
 extra-index-url = ["https://download.pytorch.org/whl/cu118"]
+# torch cu118 wheel은 PyPI가 아닌 pytorch 인덱스에만 있으므로 모든 인덱스에서 최적 버전을 탐색
+index-strategy = "unsafe-best-match"
 
 # Packages that ship no pure-Python sdist — uv must use the pre-built wheel
 no-build-isolation-package = ["flash-attn"]
