@@ -1,4 +1,6 @@
+import dataclasses
 import gc
+import inspect
 from typing import Optional
 
 import torch
@@ -8,6 +10,42 @@ from methods.rep_bending.classifier import ResponseHarmfulness, ResponseRefusal
 from methods.rep_bending.utils import generate_online_samples
 from transformers.trainer import _is_peft_model
 from trl import SFTTrainer
+
+try:
+    # trl >= 0.9: SFTTrainer expects an SFTConfig instance for `args`
+    from trl import SFTConfig
+except ImportError:  # older trl without SFTConfig
+    SFTConfig = None
+
+
+def _coerce_to_sft_config(args):
+    """
+    Convert a custom `TrainingArguments` (subclass of transformers.TrainingArguments)
+    into an `SFTConfig` instance that trl >= 0.9 accepts.
+
+    trl's SFTTrainer rebuilds non-SFTConfig args via `SFTConfig(**args.to_dict())`,
+    which crashes on custom fields such as `cache_dir`. We pre-filter to only the
+    fields that SFTConfig actually accepts to avoid that TypeError.
+    """
+    if SFTConfig is None or args is None or isinstance(args, SFTConfig):
+        return args
+
+    valid_fields = {f.name for f in dataclasses.fields(SFTConfig)}
+    # also allow __init__-only params (e.g. tokens) that aren't dataclass fields
+    try:
+        valid_fields |= set(inspect.signature(SFTConfig.__init__).parameters)
+    except (TypeError, ValueError):
+        pass
+
+    raw = args.to_dict()
+    # to_dict() redacts token values; copy them back if present
+    for tok in ("hub_token", "push_to_hub_token"):
+        if hasattr(args, tok):
+            raw[tok] = getattr(args, tok)
+
+    filtered = {k: v for k, v in raw.items() if k in valid_fields}
+    return SFTConfig(**filtered)
+
 
 module = 'hidden_states'  # Specifies the model output layer to extract hidden states
 
@@ -431,6 +469,10 @@ def get_model_generation(inputs, model, tokenizer, prefill=""):
 class CustomTrainer(SFTTrainer):
 
     def __init__(self, hyperparam_args, classifier: Optional = None, *args, **kwargs): # type: ignore
+        # trl >= 0.9 호환: 커스텀 TrainingArguments(cache_dir 등 포함)를
+        # SFTConfig가 받는 필드만 골라 변환해 SFTConfig(**...) TypeError를 방지
+        if "args" in kwargs:
+            kwargs["args"] = _coerce_to_sft_config(kwargs["args"])
         super().__init__(*args, **kwargs)
         self.num_training_steps = self.args.max_steps
         self.current_training_step = 0

@@ -32,6 +32,7 @@ dependencies = [
     "bitsandbytes",
     "torch-optimizer",
     "easydict",
+    "rich",
     # Data / IO
     "pandas",
     "jsonlines",
@@ -43,6 +44,9 @@ dependencies = [
     "pycocoevalcap",
     # Evaluation judge (vllm 0.5.5 → torch 2.4.0, transformers >= 4.43.2)
     "vllm==0.5.5",
+    # vllm/outlines 런타임 누락 의존성
+    "pyairports",
+    "pycountry",
 ]
 
 [project.optional-dependencies]

@@ -57,6 +57,32 @@ GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info() { echo -e "${GREEN}[SWEEP]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 
+# ── HuggingFace 인증 확인 ───────────────────────────────────────────────────
+# wildguardmix / Llama 등은 gated 데이터셋·모델이라 토큰이 필요합니다.
+# HF_TOKEN 또는 ~/.cache/huggingface/token 둘 중 하나가 있어야 합니다.
+HF_TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
+if [[ -z "$HF_TOKEN" && ! -f "$HOME/.cache/huggingface/token" ]]; then
+    echo -e "${YELLOW}[WARN]${NC} HuggingFace 토큰이 없습니다."
+    echo "  gated 데이터셋(allenai/wildguardmix) 접근에 실패할 수 있습니다 (403)."
+    echo "  1) https://huggingface.co/datasets/allenai/wildguardmix 에서 약관 동의"
+    echo "  2) export HF_TOKEN=hf_xxx  또는  hf auth login"
+else
+    export HF_TOKEN
+    export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
+    info "HuggingFace 토큰 감지됨."
+fi
+
+# ── 학습 데이터(wildjailbreak.jsonl) 확인 ───────────────────────────────────
+# RepBend 학습은 ./wildjailbreak.jsonl 을 필요로 합니다 (Google Drive).
+if [[ ! -f "./wildjailbreak.jsonl" ]]; then
+    warn "wildjailbreak.jsonl 이 없습니다. 다운로드를 시도합니다..."
+    bash scripts/download_data.sh || {
+        echo "[ERROR] wildjailbreak.jsonl 다운로드 실패."
+        echo "  수동 다운로드: https://drive.google.com/file/d/1Ht_fifZbw1UoUJtwQY6tEO7lyHo5rHt0/view"
+        exit 1
+    }
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Sweep 파라미터 격자
 #
