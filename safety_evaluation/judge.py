@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from typing import List
-from vllm import LLM, SamplingParams
 
 import numpy as np
 
@@ -66,6 +65,9 @@ class JudgeConfig:
 
 class Judge:
     def __init__(self, config: JudgeConfig):
+        # Lazy import: vllm 로드 시 outlines → pyairports 의존성 회피
+        from vllm import LLM, SamplingParams
+        
         self.model = LLM(
             model=config.model_name_or_path,
             dtype=config.dtype,
