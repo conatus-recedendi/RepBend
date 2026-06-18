@@ -116,9 +116,17 @@ def main():
     tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
 
     # ── 모델 로드 ───────────────────────────────────────────────────────────
+    # 분산 학습(DDP) 시에는 각 프로세스가 자신의 GPU에만 모델을 올림
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    if local_rank != -1 and world_size > 1:
+        device_map = {"": local_rank}
+    else:
+        device_map = "auto"
+
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
-        device_map="auto",
+        device_map=device_map,
         torch_dtype=torch.bfloat16 if args.bf16 else torch.float32,
     )
 

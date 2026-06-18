@@ -69,7 +69,13 @@ class RelearningDataset(Dataset):
 
         # ── 데이터 로드 ────────────────────────────────────────────────────
         print(f"[RelearningDataset] mode={relearning_mode}, loading {dataset_path} ...")
-        ds = load_dataset(dataset_path, split=dataset_split)
+        if "wildguardmix" in dataset_path:
+            # wildguardmix는 split이 아니라 config 이름(wildguardtrain/wildguardtest)을 요구한다.
+            # dataset_split 인자로 config 이름을 받고, 내부 split은 'train' 으로 고정.
+            config_name = dataset_split if dataset_split in ("wildguardtrain", "wildguardtest") else "wildguardtrain"
+            ds = load_dataset(dataset_path, config_name, split="train")
+        else:
+            ds = load_dataset(dataset_path, split=dataset_split)
 
         direct_pairs: list[tuple[str, str]] = []   # (prompt, response) unsafe 쌍
         benign_pairs: list[tuple[str, str]] = []   # (unsafe_prompt, safe_refusal_response)

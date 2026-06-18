@@ -27,6 +27,13 @@ RELEARN_STEPS="${RELEARN_STEPS:-200}"     # relearning 스텝
 BENCHMARK="${BENCHMARK:-harmbench_test.json}"
 MASTER_PORT=$((29000 + RANDOM % 1000))
 
+# ── GPU 개수 계산 ────────────────────────────────────────────────────────────
+# DEVICE="0,1,2,3" 처럼 콤마로 여러 GPU를 주면 학습은 그 개수만큼 DDP로 실행.
+# 평가(vllm)는 단일 GPU만 사용하므로 첫 번째 GPU로 제한.
+NUM_GPUS=$(awk -F',' '{print NF}' <<< "$DEVICE")
+FIRST_GPU="${DEVICE%%,*}"
+EVAL_DEVICE="${EVAL_DEVICE:-$FIRST_GPU}"
+
 export CUBLAS_WORKSPACE_CONFIG=:16:8
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
@@ -56,32 +63,6 @@ fi
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info() { echo -e "${GREEN}[SWEEP]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-
-# ── HuggingFace 인증 확인 ───────────────────────────────────────────────────
-# wildguardmix / Llama 등은 gated 데이터셋·모델이라 토큰이 필요합니다.
-# HF_TOKEN 또는 ~/.cache/huggingface/token 둘 중 하나가 있어야 합니다.
-HF_TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
-if [[ -z "$HF_TOKEN" && ! -f "$HOME/.cache/huggingface/token" ]]; then
-    echo -e "${YELLOW}[WARN]${NC} HuggingFace 토큰이 없습니다."
-    echo "  gated 데이터셋(allenai/wildguardmix) 접근에 실패할 수 있습니다 (403)."
-    echo "  1) https://huggingface.co/datasets/allenai/wildguardmix 에서 약관 동의"
-    echo "  2) export HF_TOKEN=hf_xxx  또는  hf auth login"
-else
-    export HF_TOKEN
-    export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
-    info "HuggingFace 토큰 감지됨."
-fi
-
-# ── 학습 데이터(wildjailbreak.jsonl) 확인 ───────────────────────────────────
-# RepBend 학습은 ./wildjailbreak.jsonl 을 필요로 합니다 (Google Drive).
-if [[ ! -f "./wildjailbreak.jsonl" ]]; then
-    warn "wildjailbreak.jsonl 이 없습니다. 다운로드를 시도합니다..."
-    bash scripts/download_data.sh || {
-        echo "[ERROR] wildjailbreak.jsonl 다운로드 실패."
-        echo "  수동 다운로드: https://drive.google.com/file/d/1Ht_fifZbw1UoUJtwQY6tEO7lyHo5rHt0/view"
-        exit 1
-    }
-fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sweep 파라미터 격자
@@ -141,8 +122,11 @@ PYEOF
 #   validate_file : 실제 성공 여부를 확인할 출력 파일 (없으면 "" 전달)
 #                   sentinel이 있어도 validate_file이 없으면 재실행
 #   FORCE=1       : sentinel 무시하고 항상 재실행
+#   RESTART_FROM_EVAL=1 : unlearned(학습 결과)는 그대로 두고
+#                         eval_unlearned / relearned 단계부터 다시 실행
 # ─────────────────────────────────────────────────────────────────────────────
 FORCE="${FORCE:-0}"
+RESTART_FROM_EVAL="${RESTART_FROM_EVAL:-0}"
 
 run_step() {
     local sentinel="$1"
@@ -183,7 +167,8 @@ fi
 
 info "=== Sweep 시작: $(date) ==="
 info "  Base model : $BASE_MODEL"
-info "  GPU        : $DEVICE"
+info "  GPU (train): $DEVICE  (DDP num_processes=$NUM_GPUS)"
+info "  GPU (eval) : $EVAL_DEVICE  (vllm 단일 GPU)"
 info "  Unlearn steps : $UNLEARN_STEPS"
 info "  Relearn steps : $RELEARN_STEPS"
 info "  Layer configs : ${#LAYER_CONFIGS[@]}"
@@ -207,13 +192,21 @@ for LAYER_CFG in "${LAYER_CONFIGS[@]}"; do
         info "Run: $RUN_ID"
         mkdir -p "$UNLEARN_DIR" "$EVAL_UNLEARN_DIR"
 
+        # ── RESTART_FROM_EVAL: unlearned는 유지, 이후 단계 sentinel/출력 제거 ──
+        if [[ "$RESTART_FROM_EVAL" == "1" ]]; then
+            warn "  RESTART_FROM_EVAL=1 → unlearned 유지, eval_unlearned/relearned 단계 재시작"
+            rm -rf "$EVAL_UNLEARN_DIR"
+            rm -rf "$SWEEP_ROOT/$RUN_ID"/relearned_* "$SWEEP_ROOT/$RUN_ID"/eval_relearned_*
+            mkdir -p "$EVAL_UNLEARN_DIR"
+        fi
+
         # ── (1) Unlearning ─────────────────────────────────────────────────
         run_step "$UNLEARN_DIR/.done" "$UNLEARN_DIR/adapter_config.json" \
             bash -c "
 CUDA_VISIBLE_DEVICES=$DEVICE \
 accelerate launch \
     --config_file configs/accelerate_zero1.yaml \
-    --num_processes 1 \
+    --num_processes $NUM_GPUS \
     --main_process_port $MASTER_PORT \
     methods/rep_bending/train.py \
         --model_name_or_path $BASE_MODEL \
@@ -252,7 +245,7 @@ accelerate launch \
         # ── (2) Unlearning 후 평가 ──────────────────────────────────────────
         run_step "$EVAL_UNLEARN_DIR/.done" "$EVAL_UNLEARN_DIR/log.json" \
             bash -c "
-CUDA_VISIBLE_DEVICES=$DEVICE $PYTHON safety_evaluation/evaluate.py \
+CUDA_VISIBLE_DEVICES=$EVAL_DEVICE $PYTHON safety_evaluation/evaluate.py \
     -m $UNLEARN_DIR \
     --benchmark $BENCHMARK \
     --output_dir $EVAL_UNLEARN_DIR \
@@ -291,7 +284,7 @@ CUDA_VISIBLE_DEVICES=$DEVICE $PYTHON methods/relearning/train.py \
 
             run_step "$EVAL_RELEARN_DIR/.done" "$EVAL_RELEARN_DIR/log.json" \
                 bash -c "
-CUDA_VISIBLE_DEVICES=$DEVICE $PYTHON safety_evaluation/evaluate.py \
+CUDA_VISIBLE_DEVICES=$EVAL_DEVICE $PYTHON safety_evaluation/evaluate.py \
     -m $RELEARN_DIR \
     --benchmark $BENCHMARK \
     --output_dir $EVAL_RELEARN_DIR \

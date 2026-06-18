@@ -1,3 +1,4 @@
+import os
 import random
 from dataclasses import dataclass
 
@@ -49,7 +50,15 @@ def train():
     
     # wandb.init(project="safety_hyperparam_search", name=training_args.output_dir[6:],config=hyperparam_args.to_dict())
 
-    device_map = "auto"
+    # 분산 학습(DDP/DeepSpeed) 시에는 device_map="auto"(모델 샤딩)를 쓸 수 없으므로
+    # 각 프로세스가 자신의 GPU(local_rank)에만 모델을 올린다 (데이터 병렬).
+    # 단일 프로세스일 때만 device_map="auto" 사용.
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    if local_rank != -1 and world_size > 1:
+        device_map = {"": local_rank}
+    else:
+        device_map = "auto"
 
     model_name_or_path = model_args.model_name_or_path
     target_layers = hyperparam_args.target_layers
