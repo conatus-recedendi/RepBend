@@ -1,7 +1,9 @@
 import gc
+import json
 import sys
+from pathlib import Path
 from tqdm import tqdm
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import torch
@@ -47,7 +49,15 @@ def load_model_and_tokenizer(model_name_or_path: str):
 
     return model, tokenizer
 
-def generate(model, tokenizer, instances: List[EvalInstance], gen_kwargs: dict) -> None:
+def generate(
+    model,
+    tokenizer,
+    instances: List[EvalInstance],
+    gen_kwargs: dict,
+    stream_path: Optional[Path] = None,
+    global_offset: int = 0,
+) -> None:
+    """instances를 배치 단위로 생성하고, stream_path가 주어지면 배치마다 jsonl에 기록한다."""
     batch_size = gen_kwargs.pop("batch_size")
     compute_norms = gen_kwargs.pop("compute_norms")
     prefill = gen_kwargs.pop("prefill")
@@ -132,6 +142,18 @@ def generate(model, tokenizer, instances: List[EvalInstance], gen_kwargs: dict) 
             instance.tokens = output.sequences[i, offset:]
             if compute_norms:
                 instance.activation_norms = activation_norms[i]
+
+        # ── 배치 결과를 즉시 파일에 기록 (resume 지원) ──────────────────
+        if stream_path is not None:
+            with open(stream_path, "a", encoding="utf-8") as sf:
+                for i, instance in enumerate(instance_batch):
+                    global_idx = global_offset + pbar.n + i
+                    sf.write(json.dumps({
+                        "idx": global_idx,
+                        "behavior": instance.behavior,
+                        "generation": instance.generation,
+                    }, ensure_ascii=False) + "\n")
+            print(f"[generate] streamed {len(instance_batch)} completions → {stream_path}")
 
         del generated_tokens
         gc.collect()

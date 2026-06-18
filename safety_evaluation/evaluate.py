@@ -78,14 +78,15 @@ def parse_args():
 
 def evaluate(
     model_name_or_path,
-    benchmark, 
+    benchmark,
     start,
     limit,
     seed,
     repe_config,
     softopt_config,
     gen_kwargs,
-    judge_config
+    judge_config,
+    output_dir: Path = None,
 ):
     if seed is not None:
         set_seed(seed)
@@ -107,10 +108,45 @@ def evaluate(
         instances = instances[start:]
         if limit is not None:
             instances = instances[:limit]
-    
+
+    # ── 기존 completions 이어받기 ─────────────────────────────────────────
+    stream_path = output_dir / "generations.jsonl" if output_dir is not None else None
+    resumed_count = 0
+    if stream_path is not None and stream_path.exists():
+        existing: dict[int, str] = {}
+        with open(stream_path, encoding="utf-8") as sf:
+            for line in sf:
+                line = line.strip()
+                if not line:
+                    continue
+                entry = json.loads(line)
+                existing[entry["idx"]] = entry["generation"]
+        for idx, instance in enumerate(instances):
+            if idx in existing:
+                instance.generation = existing[idx]
+                resumed_count += 1
+        print(f"[evaluate] Resumed {resumed_count}/{len(instances)} completions from {stream_path}")
+
+    # 아직 생성되지 않은 인스턴스만 추려서 생성
+    pending = [(idx, inst) for idx, inst in enumerate(instances) if inst.generation is None]
+    pending_instances = [inst for _, inst in pending]
+    pending_offset = pending[0][0] if pending else 0
+
     # Generate completions from the model
     if softopt_config is None:
-        generate(model, tokenizer, instances, gen_kwargs)
+        if pending_instances:
+            generate(
+                model, tokenizer, pending_instances, gen_kwargs,
+                stream_path=stream_path,
+                global_offset=pending_offset,
+            )
+        else:
+            print("[evaluate] 모든 completions이 이미 존재합니다. generation 스킵.")
+            # gen_kwargs는 generate() 안에서 pop()되므로 미사용 시 직접 정리
+            gen_kwargs.pop("batch_size", None)
+            gen_kwargs.pop("compute_norms", None)
+            gen_kwargs.pop("prefill", None)
+            gen_kwargs.pop("use_template", None)
     else: # softopt requires a special generation
         gen_kwargs.pop("batch_size"); gen_kwargs.pop("compute_norms"); gen_kwargs.pop("prefill"); gen_kwargs.pop("use_template")
         log_soft_embeds = softopt_config.pop("log_soft_embeds")
@@ -203,6 +239,10 @@ def main():
         "seed": args.seed,
     }
 
+    output_dir = Path(args.output_dir) if args.output_dir is not None else None
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
     score, instances = evaluate(
         args.model_name_or_path,
         args.benchmark,
@@ -212,15 +252,13 @@ def main():
         repe_config,
         softopt_config,
         gen_kwargs,
-        judge_config
+        judge_config,
+        output_dir=output_dir,
     )
 
     print(f"Evaluation score: {score}")
 
-    if args.output_dir is not None:
-        output_dir = Path(args.output_dir)
-        if not output_dir.is_dir():
-            output_dir.mkdir(parents=True, exist_ok=True)
+    if output_dir is not None:
         
         samples = []
         activation_norms = []
