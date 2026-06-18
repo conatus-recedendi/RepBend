@@ -5,6 +5,22 @@ import gc
 import json
 from pathlib import Path
 import pickle
+import sys
+import types
+
+# ── pyairports stub ──────────────────────────────────────────────────────────
+# vllm → outlines → pyairports.airports.AIRPORT_LIST 의존성 체인이 있으나,
+# 우리는 airport grammar를 사용하지 않으므로 빈 stub을 주입한다.
+try:
+    from pyairports.airports import AIRPORT_LIST  # noqa: F401
+except Exception:
+    _pkg = types.ModuleType("pyairports")
+    _mod = types.ModuleType("pyairports.airports")
+    _mod.AIRPORT_LIST = []  # type: ignore[attr-defined]
+    _pkg.airports = _mod  # type: ignore[attr-defined]
+    sys.modules.setdefault("pyairports", _pkg)
+    sys.modules.setdefault("pyairports.airports", _mod)
+# ─────────────────────────────────────────────────────────────────────────────
 
 import numpy as np
 import torch
