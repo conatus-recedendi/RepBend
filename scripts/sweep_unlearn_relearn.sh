@@ -75,8 +75,8 @@ warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 
 # 레이어 설정 (start:window 형식)
 LAYER_CONFIGS=(
-    # "15:5"    # 얕은 레이어, 좁은 범위  → unlearning 효과 약 / relearning 취약?
-    "20:11"   # 논문 기본값
+    "15:5"    # 얕은 레이어, 좁은 범위  → unlearning 효과 약 / relearning 취약?
+    # "20:11"   # 논문 기본값
     # "20:5"    # 중간 레이어, 좁은 범위
     # "25:5"    # 깊은 레이어, 좁은 범위  → unlearning 효과 강 / relearning 더 취약?
     # "15:15"   # 넓은 범위
